@@ -1,0 +1,109 @@
+version: 2.1
+
+jobs:
+  deploy-service:
+    docker:
+      - image: circleci/node:8.10
+    parameters:
+      service_path:
+        type: string
+      stage_name:
+        type: string
+    steps:
+      - checkout
+
+      - run:
+          name: merge_pull_request
+          command: |
+            echo "merge pr"
+            if [ "$CIRCLE_PULL_REQUEST" = true ]; then
+              echo "is PR"
+              echo $CIRCLE_PULL_REQUEST
+              echo $CIRCLE_PR_NUMBER
+            fi
+
+
+      - restore_cache:
+          keys:
+            - dependencies-cache-{{ checksum "package-lock.json" }}-{{ checksum "<< parameters.service_path >>/package-lock.json" }}
+            - dependencies-cache
+
+      - run:
+          name: Install Serverless CLI
+          command: sudo npm i -g serverless
+
+      - run:
+          name: Install dependencies
+          command: |
+            npm install
+            cd << parameters.service_path >>
+            npm install
+
+      - run:
+          name: Deploy application
+          command: |
+            cd << parameters.service_path >>
+            sls deploy -s << parameters.stage_name >>
+
+      - save_cache:
+          paths:
+            - node_modules
+            - services/users-api/node_modules
+          key: dependencies-cache-{{ checksum "package-lock.json" }}-{{ checksum "<< parameters.service_path >>/package-lock.json" }}
+
+workflows:
+  build-deploy:
+    jobs:
+      # non-master branches deploy to stage named by the branch
+      - deploy-service:
+          name: Deploy Users API
+          service_path: services/users-api
+          stage_name: ${CIRCLE_BRANCH}
+          context: Development
+          filters:
+            branches:
+              ignore: master
+      - deploy-service:
+          name: Deploy Posts API
+          service_path: services/posts-api
+          stage_name: ${CIRCLE_BRANCH}
+          context: Development
+          filters:
+            branches:
+              ignore: master
+      - deploy-service:
+          name: Deploy Cron Job
+          service_path: services/cron-job
+          stage_name: ${CIRCLE_BRANCH}
+          context: Development
+          filters:
+            branches:
+              ignore: master
+
+      # master branch deploy to the 'prod' stage
+      - deploy-service:
+          name: Deploy Users API
+          service_path: services/users-api
+          stage_name: prod
+          context: Production
+          filters:
+            branches:
+              only: master
+      - deploy-service:
+          name: Deploy Posts API
+          service_path: services/posts-api
+          stage_name: prod
+          context: Production
+          filters:
+            branches:
+              only: master
+      - deploy-service:
+          name: Deploy Cron Job
+          service_path: services/cron-job
+          stage_name: prod
+          context: Production
+          filters:
+            branches:
+              only: master
+
+

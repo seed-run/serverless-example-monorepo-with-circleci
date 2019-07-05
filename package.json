@@ -1,7 +1,7 @@
 {
-  "name": "serverless-template-mono-repo",
+  "name": "serverless-template-mono-repo-with-circleci",
   "version": "1.0.0",
-  "description": "serverless-template-mono-repo",
+  "description": "serverless-template-mono-repo-with-circleci",
   "main": "handler.js",
   "scripts": {},
   "author": "",

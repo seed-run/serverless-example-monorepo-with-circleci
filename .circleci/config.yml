@@ -13,15 +13,22 @@ jobs:
       - checkout
 
       - run:
-          name: merge_pull_request
+          name: Check Pull Request
           command: |
-            echo "merge pr"
-            if [ "$CIRCLE_PULL_REQUEST" = true ]; then
-              echo "is PR"
-              echo $CIRCLE_PULL_REQUEST
-              echo $CIRCLE_PR_NUMBER
+            if [[ ! -z "$CIRCLE_PULL_REQUEST" ]]; then
+              # parse pr# from URL https://github.com/fwang/sls-monorepo-with-circleci/pull/1
+              PR_NUMBER=${CIRCLE_PULL_REQUEST##*/}
+              echo "export PR_NUMBER=$PR_NUMBER" >> $BASH_ENV
+              echo "Pull request #$PR_NUMBER"
             fi
 
+      - run:
+          name: Merge Pull Request
+          command: |
+            if [[ ! -z "$PR_NUMBER" ]]; then
+              git fetch origin +refs/pull/$PR_NUMBER/merge
+              git checkout -qf FETCH_HEAD
+            fi
 
       - restore_cache:
           keys:
@@ -31,7 +38,7 @@ jobs:
       - run:
           name: Install Serverless CLI
           command: sudo npm i -g serverless
-
+            
       - run:
           name: Install dependencies
           command: |
@@ -43,7 +50,51 @@ jobs:
           name: Deploy application
           command: |
             cd << parameters.service_path >>
-            sls deploy -s << parameters.stage_name >>
+            if [[ ! -z "$PR_NUMBER" ]]; then
+              sls deploy -s pr$PR_NUMBER
+            else
+              sls deploy -s << parameters.stage_name >>
+            fi
+
+      - save_cache:
+          paths:
+            - node_modules
+            - services/users-api/node_modules
+          key: dependencies-cache-{{ checksum "package-lock.json" }}-{{ checksum "<< parameters.service_path >>/package-lock.json" }}
+
+  remove-service:
+    docker:
+      - image: circleci/node:8.10
+    parameters:
+      service_path:
+        type: string
+      stage_name:
+        type: string
+    steps:
+      - checkout
+
+      - restore_cache:
+          keys:
+            - dependencies-cache-{{ checksum "package-lock.json" }}-{{ checksum "<< parameters.service_path >>/package-lock.json" }}
+            - dependencies-cache
+
+      - run:
+          name: Install Serverless CLI
+          command: sudo npm i -g serverless
+            
+      - run:
+          name: Install dependencies
+          command: |
+            npm install
+            cd << parameters.service_path >>
+            npm install
+
+      - run:
+          name: Remove application
+          command: |
+            cd << parameters.service_path >>
+            # parse stage name from TAG rm-stage-pr1
+            sls remove -s << parameters.stage_name >>
 
       - save_cache:
           paths:
@@ -63,6 +114,7 @@ workflows:
           filters:
             branches:
               ignore: master
+
       - deploy-service:
           name: Deploy Posts API
           service_path: services/posts-api
@@ -71,6 +123,7 @@ workflows:
           filters:
             branches:
               ignore: master
+
       - deploy-service:
           name: Deploy Cron Job
           service_path: services/cron-job
@@ -89,6 +142,7 @@ workflows:
           filters:
             branches:
               only: master
+
       - deploy-service:
           name: Deploy Posts API
           service_path: services/posts-api
@@ -97,6 +151,7 @@ workflows:
           filters:
             branches:
               only: master
+
       - deploy-service:
           name: Deploy Cron Job
           service_path: services/cron-job
@@ -106,4 +161,36 @@ workflows:
             branches:
               only: master
 
+      # remove non-production stages
+      - remove-service:
+          name: Remove Users API
+          service_path: services/users-api
+          stage_name: ${CIRCLE_TAG:9}
+          context: Development
+          filters:
+            tags:
+              only: /^rm-stage-.*/
+            branches:
+              ignore: /.*/
 
+      - remove-service:
+          name: Remove Posts API
+          service_path: services/posts-api
+          stage_name: ${CIRCLE_TAG:9}
+          context: Development
+          filters:
+            tags:
+              only: /^rm-stage-.*/
+            branches:
+              ignore: /.*/
+
+      - remove-service:
+          name: Remove Cron Job
+          service_path: services/cron-job
+          stage_name: ${CIRCLE_TAG:9}
+          context: Development
+          filters:
+            tags:
+              only: /^rm-stage-.*/
+            branches:
+              ignore: /.*/
